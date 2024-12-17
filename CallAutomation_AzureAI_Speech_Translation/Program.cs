@@ -17,6 +17,15 @@ var builder = WebApplication.CreateBuilder(args);
 var acsConnectionString = builder.Configuration.GetValue<string>("AcsConnectionString");
 ArgumentNullException.ThrowIfNullOrEmpty(acsConnectionString);
 
+var acsPhoneNumber = builder.Configuration.GetValue<string>("AcsPhoneNumber");
+ArgumentNullException.ThrowIfNullOrEmpty(acsPhoneNumber);
+
+var speechSubscriptionKey = builder.Configuration.GetValue<string>("AzureAISpeechKey");
+ArgumentNullException.ThrowIfNullOrEmpty(speechSubscriptionKey);
+
+var speechRegion = builder.Configuration.GetValue<string>("AzureAISpeechRegion");
+ArgumentNullException.ThrowIfNullOrEmpty(speechRegion);
+
 //Call Automation Client
 var client = new CallAutomationClient(acsConnectionString);
 
@@ -123,15 +132,17 @@ app.MapPost("/api/callbacks/{contextId}", async (
         if (@event is CallConnected callConnected)
         {
             logger.LogInformation($"Received Call Connected Event: for connection id: {@event.CallConnectionId}, correlationId: {@event.CorrelationId}, operationContext: {@event.OperationContext}");
+            callerCallConnectionId = @event.CallConnectionId;
 
             if ("firstCallConnected".Equals(callConnected.OperationContext))
             {
                 logger.LogInformation($"First Call Connected. Starting recognize to get phone number");
 
-                var recognizeOptions = new CallMediaRecognizeDtmfOptions(new PhoneNumberIdentifier("+14255335486"), 10)
+                var recognizeOptions = new CallMediaRecognizeDtmfOptions(new PhoneNumberIdentifier("+14255335486"), 11)
                 {
-                    Prompt = new TextSource("Hello welcome to multi language calling sample. Please enter your 10 digit US phone number", "en-US", VoiceKind.Male),
-                    StopTones = new List<DtmfTone> { DtmfTone.Pound }
+                    Prompt = new TextSource("Hello welcome to multi language calling sample. Please enter your 10 digit US phone number followed by Pound sign.", "en-US", VoiceKind.Male),
+                    StopTones = new List<DtmfTone> { DtmfTone.Pound },
+                    InterruptPrompt = true
                 };
 
                 await callMedia.StartRecognizingAsync(recognizeOptions);
@@ -141,17 +152,18 @@ app.MapPost("/api/callbacks/{contextId}", async (
         if (@event is RecognizeCompleted recognizeCompleted)
         {
             logger.LogInformation($"[CALLER CALL] Received Recognize Completed Event: for connection id: {@event.CallConnectionId}, correlationId: {@event.CorrelationId}, operationContext: {@event.OperationContext}");
+            var agentPhoneNumber = "";
             switch (recognizeCompleted.RecognizeResult)
             {
                 case DtmfResult dtmfResult:
-                    var tones = dtmfResult.ConvertToString();
-                    logger.LogInformation($"[CALLER CALL] Recognize completed succesfully, tones={tones}");
+                    agentPhoneNumber = dtmfResult.ConvertToString();
+                    logger.LogInformation($"[CALLER CALL] Recognize completed succesfully, agentPhoneNumber={agentPhoneNumber}");
                     break;
 
             }
 
-            PhoneNumberIdentifier caller = new PhoneNumberIdentifier("+14253324768");
-            PhoneNumberIdentifier target = new PhoneNumberIdentifier("+14254215033");
+            PhoneNumberIdentifier caller = new PhoneNumberIdentifier(acsPhoneNumber);
+            PhoneNumberIdentifier target = new PhoneNumberIdentifier($"+1{agentPhoneNumber}");
             CallInvite callInvite = new CallInvite(target, caller);
             var callbackUri = new Uri(new Uri(devTunnelUri), $"/api/callbacks/agentCall/{Guid.NewGuid()}?callerId={callerId}");
 
@@ -186,12 +198,14 @@ app.MapPost("/api/callbacks/{contextId}", async (
 
         if (@event is CallDisconnected callDisconnected)
         {
-            logger.LogInformation($"[CALLER CALL] Received Media Streaming Stopped Event: for connection id: {@event.CallConnectionId} and correlationId: {@event.CorrelationId}");
+            logger.LogInformation($"[CALLER CALL] Received Call Disconnected Event: for connection id: {@event.CallConnectionId} and correlationId: {@event.CorrelationId}");
 
+            callerCallConnectionId = null;
             if (!string.IsNullOrEmpty(agentCallConnectionId))
             {
                 var agentCall = client.GetCallConnection(agentCallConnectionId);
                 await agentCall.HangUpAsync(forEveryone: true);
+                agentCorrelationId = null;
             }
         }
     }
@@ -240,12 +254,13 @@ app.MapPost("/api/callbacks/agentCall/{contextId}", async (
 
         if (@event is CallDisconnected callDisconnected)
         {
-            logger.LogInformation($"[AGENT CALL] Received Media Streaming Stopped Event: for connection id: {@event.CallConnectionId} and correlationId: {@event.CorrelationId}");
+            logger.LogInformation($"[AGENT CALL] Received Call Disconnected Event: for connection id: {@event.CallConnectionId} and correlationId: {@event.CorrelationId}");
 
             if (!string.IsNullOrEmpty(callerCallConnectionId))
             {
                 var callerCall = client.GetCallConnection(callerCallConnectionId);
                 await callerCall.HangUpAsync(forEveryone: true);
+                callerCallConnectionId = null;
             }
         }
     }
