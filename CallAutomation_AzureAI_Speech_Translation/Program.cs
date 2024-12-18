@@ -3,6 +3,7 @@ using Azure.Communication.CallAutomation;
 using Azure.Messaging;
 using Azure.Messaging.EventGrid;
 using Azure.Messaging.EventGrid.SystemEvents;
+using CallAutomation_AzureAI_Speech_Translation;
 using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json;
@@ -28,6 +29,9 @@ ArgumentNullException.ThrowIfNullOrEmpty(speechRegion);
 
 //Call Automation Client
 var client = new CallAutomationClient(acsConnectionString);
+
+//Call Store
+var callStore = new Dictionary<string, CallContext>();
 
 //Register and make CallAutomationClient accessible via dependency injection
 builder.Services.AddSingleton(client);
@@ -83,7 +87,7 @@ app.MapPost("/api/incomingCall", async (
                 new Uri(callerTransportUrl),
                 MediaStreamingContent.Audio,
                 MediaStreamingAudioChannel.Mixed,
-                startMediaStreaming: true);
+                startMediaStreaming: false);
 
         var callIntelligenceOptions = new CallIntelligenceOptions()
         {
@@ -232,6 +236,9 @@ app.MapPost("/api/callbacks/agentCall/{contextId}", async (
         if (@event is CallConnected callConnected)
         {
             logger.LogInformation($"[AGENT CALL] Received Call Connected Event: for connection id: {@event.CallConnectionId}, correlationId: {@event.CorrelationId}, operationContext: {@event.OperationContext}");
+
+            var callerCall = client.GetCallConnection(callerCallConnectionId);
+            await callerCall.GetCallMedia().StartMediaStreamingAsync();
         }
 
         if (@event is MediaStreamingStarted)
@@ -276,32 +283,9 @@ app.Use(async (context, next) =>
     {
         if (context.WebSockets.IsWebSocketRequest)
         {
-
             callerWebsocket = await context.WebSockets.AcceptWebSocketAsync();
-
-            try
-            {
-                string partialData = "";
-                while (callerWebsocket.State == WebSocketState.Open || callerWebsocket.State == WebSocketState.CloseSent)
-                {
-                    byte[] receiveBuffer = new byte[2048];
-                    var cancellationToken = new CancellationTokenSource(TimeSpan.FromSeconds(120)).Token;
-                    WebSocketReceiveResult receiveResult = await callerWebsocket.ReceiveAsync(new ArraySegment<byte>(receiveBuffer), cancellationToken);
-
-                    if (receiveResult.MessageType != WebSocketMessageType.Close)
-                    {
-                        if (receiveResult.MessageType != WebSocketMessageType.Close)
-                        {
-                            string data = Encoding.UTF8.GetString(receiveBuffer).TrimEnd('\0');
-                            //Console.WriteLine("CALLLLLEEERR-----------: " + data);                
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Exception 2 -> {ex}");
-            }
+            var callerTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, callerWebsocket, agentWebSocket, "en-US", "de", "german");
+            await callerTranslator.ProcessWebSocketAsync();
         }
         else
         {
@@ -312,31 +296,9 @@ app.Use(async (context, next) =>
     {
         if (context.WebSockets.IsWebSocketRequest)
         {
-
             agentWebSocket = await context.WebSockets.AcceptWebSocketAsync();
-
-            try
-            {
-                while (agentWebSocket.State == WebSocketState.Open || agentWebSocket.State == WebSocketState.CloseSent)
-                {
-                    byte[] receiveBuffer = new byte[2048];
-                    var cancellationToken = new CancellationTokenSource(TimeSpan.FromSeconds(120)).Token;
-                    WebSocketReceiveResult receiveResult = await agentWebSocket.ReceiveAsync(new ArraySegment<byte>(receiveBuffer), cancellationToken);
-
-                    if (receiveResult.MessageType != WebSocketMessageType.Close)
-                    {
-                        if (receiveResult.MessageType != WebSocketMessageType.Close)
-                        {
-                            string data = Encoding.UTF8.GetString(receiveBuffer).TrimEnd('\0');
-                            //Console.WriteLine("AGENTTTTT-----------: " + data);                
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Exception 2 -> {ex}");
-            }
+            var agentTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, agentWebSocket, callerWebsocket, "de", "en-US", "german");
+            await agentTranslator.ProcessWebSocketAsync();
         }
         else
         {
