@@ -7,6 +7,7 @@ using CallAutomation_AzureAI_Speech_Translation;
 using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json;
+using System.Collections.Concurrent;
 using System.ComponentModel.DataAnnotations;
 using System.Net.WebSockets;
 using System.Text;
@@ -31,7 +32,9 @@ ArgumentNullException.ThrowIfNullOrEmpty(speechRegion);
 var client = new CallAutomationClient(acsConnectionString);
 
 //Call Store
-var callStore = new Dictionary<string, CallContext>();
+var callStore = new CallStore();
+
+var callConnectionIdMapping = new ConcurrentDictionary<string, string>();
 
 //Register and make CallAutomationClient accessible via dependency injection
 builder.Services.AddSingleton(client);
@@ -44,14 +47,6 @@ ArgumentNullException.ThrowIfNullOrEmpty(devTunnelUri);
 
 var callerTransportUrl = devTunnelUri.Replace("https", "wss") + "/ws";
 var agentTransportUrl = devTunnelUri.Replace("https", "wss") + "/ws2";
-
-WebSocket callerWebsocket = null;
-WebSocket agentWebSocket = null;
-string callerCallConnectionId = null;
-string agentCallConnectionId = null;
-string callerCorrelationId = null;
-string agentCorrelationId = null;
-
 
 app.MapGet("/", () => "Hello ACS CallAutomation!");
 
@@ -83,8 +78,9 @@ app.MapPost("/api/incomingCall", async (
         var callbackUri = new Uri(new Uri(devTunnelUri), $"/api/callbacks/{Guid.NewGuid()}?callerId={callerId}");
         Console.WriteLine($"Callback Url: {callbackUri}");
 
+        var callConnectionIdKey = Guid.NewGuid().ToString();
         var mediaStreamingOptions = new MediaStreamingOptions(
-                new Uri(callerTransportUrl),
+                new Uri($"{ callerTransportUrl }?callConnectionIdkey={callConnectionIdKey}"),
                 MediaStreamingContent.Audio,
                 MediaStreamingAudioChannel.Mixed,
                 startMediaStreaming: false);
@@ -97,8 +93,7 @@ app.MapPost("/api/incomingCall", async (
         var options = new AnswerCallOptions(incomingCallContext, callbackUri)
         {
             CallIntelligenceOptions = callIntelligenceOptions,
-            MediaStreamingOptions = mediaStreamingOptions,
-            OperationContext = "firstCallConnected"
+            MediaStreamingOptions = mediaStreamingOptions
         };
 
         AnswerCallResult answerCallResult = await client.AnswerCallAsync(options);
@@ -109,8 +104,7 @@ app.MapPost("/api/incomingCall", async (
         if (answer_result.IsSuccess)
         {
             Console.WriteLine($"Call connected event received for CorrelationId id: {answer_result.SuccessResult.CorrelationId}");
-            callerCorrelationId = answer_result.SuccessResult.CorrelationId;
-            callerCallConnectionId = answer_result.SuccessResult.CallConnectionId;
+            callConnectionIdMapping.TryAdd(callConnectionIdKey, answer_result.SuccessResult.CorrelationId);
         }
     }
     return Results.Ok();
@@ -136,10 +130,13 @@ app.MapPost("/api/callbacks/{contextId}", async (
         if (@event is CallConnected callConnected)
         {
             logger.LogInformation($"Received Call Connected Event: for connection id: {@event.CallConnectionId}, correlationId: {@event.CorrelationId}, operationContext: {@event.OperationContext}");
-            callerCallConnectionId = @event.CallConnectionId;
-
-            if ("firstCallConnected".Equals(callConnected.OperationContext))
+            var callContext = new CallContext
             {
+                CallerCallConnectionId = @event.CallConnectionId,
+                CallerCorrelationId = @event.CorrelationId,
+            };
+            callStore.AddOrUpdateCallContext( callContext );
+
                 logger.LogInformation($"First Call Connected. Starting recognize to get phone number");
 
                 var recognizeOptions = new CallMediaRecognizeDtmfOptions(new PhoneNumberIdentifier("+14255335486"), 11)
@@ -150,7 +147,6 @@ app.MapPost("/api/callbacks/{contextId}", async (
                 };
 
                 await callMedia.StartRecognizingAsync(recognizeOptions);
-            }
         }
 
         if (@event is RecognizeCompleted recognizeCompleted)
@@ -171,15 +167,23 @@ app.MapPost("/api/callbacks/{contextId}", async (
             CallInvite callInvite = new CallInvite(target, caller);
             var callbackUri = new Uri(new Uri(devTunnelUri), $"/api/callbacks/agentCall/{Guid.NewGuid()}?callerId={callerId}");
 
+            var callConnectionIdKey = Guid.NewGuid().ToString();
+
             var createCallOptions = new CreateCallOptions(callInvite, callbackUri)
             {
-                MediaStreamingOptions = new MediaStreamingOptions(new Uri(agentTransportUrl), MediaStreamingContent.Audio, MediaStreamingAudioChannel.Mixed, MediaStreamingTransport.Websocket, true)
+                MediaStreamingOptions = new MediaStreamingOptions(
+                            new Uri($"{agentTransportUrl}?callConnectionIdKey={callConnectionIdKey}"),
+                            MediaStreamingContent.Audio,
+                            MediaStreamingAudioChannel.Mixed,
+                            MediaStreamingTransport.Websocket,
+                            false),
+                OperationContext = @event.CallConnectionId
             };
 
             CreateCallResult createCallResult = await client.CreateCallAsync(createCallOptions);
             logger.LogInformation($"[AGENT CALL] Created call with connection id: {createCallResult.CallConnectionProperties.CallConnectionId}");
-            agentCallConnectionId = createCallResult.CallConnectionProperties.CallConnectionId;
-            agentCorrelationId = createCallResult.CallConnectionProperties.CorrelationId;
+            callConnectionIdMapping.TryAdd(callConnectionIdKey, createCallResult.CallConnectionProperties.CorrelationId);
+
         }
 
         if (@event is MediaStreamingStarted)
@@ -204,13 +208,15 @@ app.MapPost("/api/callbacks/{contextId}", async (
         {
             logger.LogInformation($"[CALLER CALL] Received Call Disconnected Event: for connection id: {@event.CallConnectionId} and correlationId: {@event.CorrelationId}");
 
-            callerCallConnectionId = null;
-            if (!string.IsNullOrEmpty(agentCallConnectionId))
+            var callContext = callStore.GetCallContext(@event.CallConnectionId);
+
+            if (!string.IsNullOrEmpty(callContext.AgentCallConnectionId))
             {
-                var agentCall = client.GetCallConnection(agentCallConnectionId);
+                var agentCall = client.GetCallConnection(callContext.AgentCallConnectionId);
                 await agentCall.HangUpAsync(forEveryone: true);
-                agentCorrelationId = null;
             }
+
+            callStore.RemoveCallContext(@event.CallConnectionId);
         }
     }
     return Results.Ok();
@@ -237,8 +243,18 @@ app.MapPost("/api/callbacks/agentCall/{contextId}", async (
         {
             logger.LogInformation($"[AGENT CALL] Received Call Connected Event: for connection id: {@event.CallConnectionId}, correlationId: {@event.CorrelationId}, operationContext: {@event.OperationContext}");
 
+            var callerCallConnectionId = @event.OperationContext;
+            var callContext = callStore.GetCallContext(callerCallConnectionId);
+
+            callContext.AgentCallConnectionId = @event.CallConnectionId;
+            callContext.AgentCorrelationId = @event.CorrelationId;
+
             var callerCall = client.GetCallConnection(callerCallConnectionId);
             await callerCall.GetCallMedia().StartMediaStreamingAsync();
+
+            var agentCall = client.GetCallConnection(@event.CallConnectionId);
+            await agentCall.GetCallMedia().StartMediaStreamingAsync();
+
         }
 
         if (@event is MediaStreamingStarted)
@@ -263,12 +279,15 @@ app.MapPost("/api/callbacks/agentCall/{contextId}", async (
         {
             logger.LogInformation($"[AGENT CALL] Received Call Disconnected Event: for connection id: {@event.CallConnectionId} and correlationId: {@event.CorrelationId}");
 
-            if (!string.IsNullOrEmpty(callerCallConnectionId))
+            var callContext = callStore.GetCallContext(@event.CallConnectionId);
+
+            if (!string.IsNullOrEmpty(callContext?.CallerCallConnectionId))
             {
-                var callerCall = client.GetCallConnection(callerCallConnectionId);
+                var callerCall = client.GetCallConnection(callContext.CallerCallConnectionId);
                 await callerCall.HangUpAsync(forEveryone: true);
-                callerCallConnectionId = null;
             }
+
+            callStore.RemoveCallContext(@event.CallConnectionId);
         }
     }
     return Results.Ok();
@@ -283,8 +302,29 @@ app.Use(async (context, next) =>
     {
         if (context.WebSockets.IsWebSocketRequest)
         {
-            callerWebsocket = await context.WebSockets.AcceptWebSocketAsync();
-            var callerTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, callerWebsocket, agentWebSocket, "en-US", "de", "german");
+            // Extract the query parameter `callConnectionId` from the WebSocket request
+            var query = context.Request.Query;
+            if (!query.TryGetValue("callConnectionIdKey", out var callConnectionIdKey) || string.IsNullOrEmpty(callConnectionIdKey))
+            {
+                context.Response.StatusCode = 400; // Bad Request
+                await context.Response.WriteAsync("Missing or invalid callConnectionId query parameter.");
+                return;
+            }
+
+            callConnectionIdMapping.TryGetValue(callConnectionIdKey, out var callConnectionId);
+            var callerWebsocket = await context.WebSockets.AcceptWebSocketAsync();
+            var callContext = callStore.GetCallContext(callConnectionId);
+            callContext.CallerWebSocket = callerWebsocket;
+
+            var callerTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion)
+            {
+                InputWebSocket = callerWebsocket,
+                FromLanguage = "en-US",
+                ToLanguage = "hi",
+                VoiceName = "hi-IN-AnanyaNeural"
+            };
+
+            callContext.CallerTranslator = callerTranslator;
             await callerTranslator.ProcessWebSocketAsync();
         }
         else
@@ -296,8 +336,29 @@ app.Use(async (context, next) =>
     {
         if (context.WebSockets.IsWebSocketRequest)
         {
-            agentWebSocket = await context.WebSockets.AcceptWebSocketAsync();
-            var agentTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, agentWebSocket, callerWebsocket, "de", "en-US", "german");
+            // Extract the query parameter `callConnectionId` from the WebSocket request
+            var query = context.Request.Query;
+            if (!query.TryGetValue("callConnectionIdKey", out var callConnectionIdKey) || string.IsNullOrEmpty(callConnectionIdKey))
+            {
+                context.Response.StatusCode = 400; // Bad Request
+                await context.Response.WriteAsync("Missing or invalid callConnectionId query parameter.");
+                return;
+            }
+            callConnectionIdMapping.TryGetValue(callConnectionIdKey, out var callConnectionId);
+            var agentWebSocket = await context.WebSockets.AcceptWebSocketAsync();
+            var callContext = callStore.GetCallContext(callConnectionId);
+            callContext.AgentWebSocket = agentWebSocket;
+            callContext.CallerTranslator.OutputWebSocket = agentWebSocket;
+
+            var agentTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion)
+            {
+                InputWebSocket = agentWebSocket,
+                OutputWebSocket = callContext.CallerWebSocket,
+                FromLanguage = "hi",
+                ToLanguage = "en-US",
+                VoiceName = "en-US-JennyNeural"
+            };
+            
             await agentTranslator.ProcessWebSocketAsync();
         }
         else
