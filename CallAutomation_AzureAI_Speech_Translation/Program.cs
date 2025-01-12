@@ -10,6 +10,7 @@ using Newtonsoft.Json;
 using System.ComponentModel.DataAnnotations;
 using System.Net.WebSockets;
 using System.Text;
+using System.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -51,6 +52,7 @@ string callerCallConnectionId = null;
 string agentCallConnectionId = null;
 string callerCorrelationId = null;
 string agentCorrelationId = null;
+bool noAgentCall = false;
 
 
 app.MapGet("/", () => "Hello ACS CallAutomation!");
@@ -87,11 +89,15 @@ app.MapPost("/api/incomingCall", async (
                 new Uri(callerTransportUrl),
                 MediaStreamingContent.Audio,
                 MediaStreamingAudioChannel.Mixed,
-                startMediaStreaming: false);
+                startMediaStreaming: false)
+        {
+            EnableBidirectional = true,
+            AudioFormat = AudioFormat.Pcm16KMono
+        };
 
         var callIntelligenceOptions = new CallIntelligenceOptions()
         {
-            CognitiveServicesEndpoint = new Uri("https://acs-media-cogsv-west-us-test.cognitiveservices.azure.com/")
+            CognitiveServicesEndpoint = new Uri("https://communication-services-aiservices.cognitiveservices.azure.com/")
         };
 
         var options = new AnswerCallOptions(incomingCallContext, callbackUri)
@@ -142,7 +148,7 @@ app.MapPost("/api/callbacks/{contextId}", async (
             {
                 logger.LogInformation($"First Call Connected. Starting recognize to get phone number");
 
-                var recognizeOptions = new CallMediaRecognizeDtmfOptions(new PhoneNumberIdentifier("+14255335486"), 11)
+                var recognizeOptions = new CallMediaRecognizeDtmfOptions(new PhoneNumberIdentifier("+14258298235"), 11)
                 {
                     Prompt = new TextSource("Hello welcome to multi language calling sample. Please enter your 10 digit US phone number followed by Pound sign.", "en-US", VoiceKind.Male),
                     StopTones = new List<DtmfTone> { DtmfTone.Pound },
@@ -166,20 +172,55 @@ app.MapPost("/api/callbacks/{contextId}", async (
 
             }
 
-            PhoneNumberIdentifier caller = new PhoneNumberIdentifier(acsPhoneNumber);
-            PhoneNumberIdentifier target = new PhoneNumberIdentifier($"+1{agentPhoneNumber}");
-            CallInvite callInvite = new CallInvite(target, caller);
-            var callbackUri = new Uri(new Uri(devTunnelUri), $"/api/callbacks/agentCall/{Guid.NewGuid()}?callerId={callerId}");
-
-            var createCallOptions = new CreateCallOptions(callInvite, callbackUri)
+            if(agentPhoneNumber.Length != 10 && agentPhoneNumber.Length != 0)
             {
-                MediaStreamingOptions = new MediaStreamingOptions(new Uri(agentTransportUrl), MediaStreamingContent.Audio, MediaStreamingAudioChannel.Mixed, MediaStreamingTransport.Websocket, true)
-            };
+                logger.LogInformation($"[CALLER CALL] Invalid phone number entered by caller. Disconnecting the call.");
+                await callConnection.HangUpAsync(forEveryone: true);
+                return Results.Ok();
+            }
 
-            CreateCallResult createCallResult = await client.CreateCallAsync(createCallOptions);
-            logger.LogInformation($"[AGENT CALL] Created call with connection id: {createCallResult.CallConnectionProperties.CallConnectionId}");
-            agentCallConnectionId = createCallResult.CallConnectionProperties.CallConnectionId;
-            agentCorrelationId = createCallResult.CallConnectionProperties.CorrelationId;
+            if (agentPhoneNumber.Length != 0)
+            {
+                noAgentCall = false;
+                PhoneNumberIdentifier caller = new PhoneNumberIdentifier(acsPhoneNumber);
+                PhoneNumberIdentifier target = new PhoneNumberIdentifier($"+1{agentPhoneNumber}");
+                CallInvite callInvite = new CallInvite(target, caller);
+                var callbackUri = new Uri(new Uri(devTunnelUri), $"/api/callbacks/agentCall/{Guid.NewGuid()}?callerId={callerId}");
+
+                var createCallOptions = new CreateCallOptions(callInvite, callbackUri)
+                {
+                    MediaStreamingOptions = new MediaStreamingOptions(
+                                                new Uri(agentTransportUrl),
+                                                MediaStreamingContent.Audio,
+                                                MediaStreamingAudioChannel.Mixed,
+                                                MediaStreamingTransport.Websocket,
+                                                true)
+                    {
+                        EnableBidirectional = true,
+                        AudioFormat = AudioFormat.Pcm16KMono
+                    }
+                };
+
+                CreateCallResult createCallResult = await client.CreateCallAsync(createCallOptions);
+                logger.LogInformation($"[AGENT CALL] Created call with connection id: {createCallResult.CallConnectionProperties.CallConnectionId}");
+                agentCallConnectionId = createCallResult.CallConnectionProperties.CallConnectionId;
+                agentCorrelationId = createCallResult.CallConnectionProperties.CorrelationId;
+  
+            }
+            else
+            {
+                noAgentCall = true;
+                if (callMedia != null)
+                {
+                    //Start media streaming on on the caller side
+                    StartMediaStreamingOptions options = new StartMediaStreamingOptions()
+                    {
+                        OperationContext = "startMediaStreamingContext"
+                    };
+
+                    await callMedia.StartMediaStreamingAsync();
+                }
+            }
         }
 
         if (@event is MediaStreamingStarted)
@@ -284,8 +325,26 @@ app.Use(async (context, next) =>
         if (context.WebSockets.IsWebSocketRequest)
         {
             callerWebsocket = await context.WebSockets.AcceptWebSocketAsync();
-            var callerTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, callerWebsocket, agentWebSocket, "en-US", "de", "german");
-            await callerTranslator.ProcessWebSocketAsync();
+
+            if (noAgentCall == false)
+            { 
+                Debug.WriteLine("Waiting for agentWebSocket ...");
+                while (agentWebSocket == null)
+                {
+                    await Task.Delay(500);
+                }
+                Debug.WriteLine("agentWebSocket connected ...");
+                // send translation from caller to agent
+                var callerTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, callerWebsocket, agentWebSocket, "any", "en", "en-US-AvaMultilingualNeural", true);
+                await callerTranslator.ProcessWebSocketAsync();
+            }
+            else
+            {
+                Debug.WriteLine("No agent call, starting media streaming ...");
+                // echo caller translation back on the caller side. 
+                var callerTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, callerWebsocket, callerWebsocket, "any", "en", "en-US-AvaMultilingualNeural", false);
+                await callerTranslator.ProcessWebSocketAsync();
+            }
         }
         else
         {
@@ -297,7 +356,16 @@ app.Use(async (context, next) =>
         if (context.WebSockets.IsWebSocketRequest)
         {
             agentWebSocket = await context.WebSockets.AcceptWebSocketAsync();
-            var agentTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, agentWebSocket, callerWebsocket, "de", "en-US", "german");
+
+            Debug.WriteLine("Waiting for callerWebSocket ...");
+            while (callerWebsocket == null)
+            {
+                await Task.Delay(500);
+            }
+            Debug.WriteLine("callerWebSocket connected ...");
+
+            //send translation from agent to caller. Only turn on SDK logging once on the caller side.
+            var agentTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, agentWebSocket, callerWebsocket, "any", "de", "en-US-AvaMultilingualNeural", false);
             await agentTranslator.ProcessWebSocketAsync();
         }
         else
