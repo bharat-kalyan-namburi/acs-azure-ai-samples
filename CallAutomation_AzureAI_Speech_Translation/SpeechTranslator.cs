@@ -18,15 +18,16 @@ namespace CallAutomation_AzureAI_Speech_Translation
         private readonly SpeechTranslationConfig m_speechConfig;
         private CancellationTokenSource m_cts;
         //private ILogger<Program> m_logger;
-        
+
         public string FromLanguage;
         public string ToLanguage;
         public string VoiceName;
 
         private void DebugOut(string logtext)
         {
-            Debug.WriteLine(logtext);
-            //m_logger.LogInformation(logtext);
+            string timestampedLog = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} - {logtext}";
+            Debug.WriteLine(timestampedLog);
+            //m_logger.LogInformation(timestampedLog);
         }
 
         private void stripRiffHeader(ref byte[] audioData)
@@ -37,7 +38,6 @@ namespace CallAutomation_AzureAI_Speech_Translation
             Array.Copy(audioData, 44, newAudioData, 0, newAudioData.Length);
             audioData = newAudioData;
         }
-
 
         public SpeechTranslator(
             string speechSubscriptionKey,
@@ -61,7 +61,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
             //m_speechConfig = SpeechTranslationConfig.FromSubscription(speechSubscriptionKey, speechRegion);
 
             if (logSDK)
-            { 
+            {
                 // Generate log filename with date and timestamp
                 string logFilename = $"E:\\Logs\\SDK-log-{DateTime.Now:yyyyMMdd-HHmmss}.txt";
                 // Enable Speech SDK logs for debugging purposes
@@ -79,10 +79,13 @@ namespace CallAutomation_AzureAI_Speech_Translation
 
             //Enable semantic segmentation for shorter translation turns
             m_speechConfig.SetProperty(PropertyId.Speech_SegmentationStrategy, "Semantic");
+            //This setting makes the partial translation results more stable, but it also makes the translation results a bit slower.
+            m_speechConfig.SetProperty(PropertyId.SpeechServiceResponse_TranslationRequestStablePartialResult, "true");
 
             m_cts = new CancellationTokenSource();
             m_audioInputStream = AudioInputStream.CreatePushStream(AudioStreamFormat.GetWaveFormatPCM(16000, 16, 1));
-            if (FromLanguage.ToLower() == "any") {
+            if (FromLanguage.ToLower() == "any")
+            {
                 // This enables multi-lingual translation with auto detection of the source language among a large set of input languages.
                 var autoDetectSourceLanguageConfig = AutoDetectSourceLanguageConfig.FromOpenRange();
                 m_speechRecognizer = new TranslationRecognizer(m_speechConfig, autoDetectSourceLanguageConfig, AudioConfig.FromStreamInput(m_audioInputStream));
@@ -104,7 +107,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
                 DebugOut($"RECOGNIZING in '{FromLanguage}': Text={e.Result.Text}");
                 foreach (var element in e.Result.Translations)
                 {
-                    DebugOut($"TRANSLATING into '{element.Key}': {element.Value}");
+                    DebugOut($"Recognizing '{element.Key}': {element.Value}");
                 }
             };
 
@@ -112,10 +115,10 @@ namespace CallAutomation_AzureAI_Speech_Translation
             {
                 if (e.Result.Reason == ResultReason.TranslatedSpeech)
                 {
-                    DebugOut($"\nFinal result: Reason: {e.Result.Reason.ToString()}, recognized text in {FromLanguage}: {e.Result.Text}.");
+                    DebugOut($"Final result: Reason: {e.Result.Reason.ToString()}, recognized text in {FromLanguage}: {e.Result.Text}.");
                     foreach (var element in e.Result.Translations)
                     {
-                        DebugOut($"    TRANSLATING into '{element.Key}': {element.Value}");
+                        DebugOut($"Translated into '{element.Key}': {element.Value}");
                     }
                 }
             };
@@ -136,12 +139,12 @@ namespace CallAutomation_AzureAI_Speech_Translation
                         //{
                         //    fileStream.Write(audio, 0, audio.Length);
                         //}
-                        
+
                         // Create a ServerAudioData object for this chunk
                         var audioData = OutStreamingData.GetAudioDataForOutbound(audio);
 
                         byte[] jsonBytes = Encoding.UTF8.GetBytes(audioData);
-                        OutputWebSocket.SendAsync(new ArraySegment<byte>(jsonBytes), WebSocketMessageType.Text, false, new CancellationToken()).GetAwaiter().GetResult();
+                        //OutputWebSocket.SendAsync(new ArraySegment<byte>(jsonBytes), WebSocketMessageType.Text, false, new CancellationToken()).GetAwaiter().GetResult();
                         await OutputWebSocket.SendAsync(new ArraySegment<byte>(jsonBytes), WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None);
                     }
                     else
@@ -153,17 +156,17 @@ namespace CallAutomation_AzureAI_Speech_Translation
 
             m_speechRecognizer.Canceled += (s, e) =>
             {
-                DebugOut($"\nRecognition canceled. Reason: {e.Reason}; ErrorDetails: {e.ErrorDetails}");
+                DebugOut($"Recognition canceled. Reason: {e.Reason}; ErrorDetails: {e.ErrorDetails}");
             };
 
             m_speechRecognizer.SessionStarted += (s, e) =>
             {
-                DebugOut("\nSession started event.");
+                DebugOut("Session started event.");
             };
 
             m_speechRecognizer.SessionStopped += (s, e) =>
             {
-                DebugOut("\nSession stopped event.");
+                DebugOut("Session stopped event.");
             };
         }
 
@@ -193,6 +196,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
                 while (InputWebSocket.State == WebSocketState.Open || InputWebSocket.State == WebSocketState.Closed)
                 {
                     byte[] receiveBuffer = new byte[2048];
+                    //DebugOut($"Waiting for message from WebSocket {InputWebSocket.State}");
                     WebSocketReceiveResult receiveResult = await InputWebSocket.ReceiveAsync(new ArraySegment<byte>(receiveBuffer), m_cts.Token);
                     //DebugOut($"Received message from WebSocket. MessageType: {receiveResult.MessageType}, EndOfMessage: {receiveResult.EndOfMessage}, CloseStatus: {InputWebSocket.CloseStatus}");
 
@@ -201,9 +205,10 @@ namespace CallAutomation_AzureAI_Speech_Translation
                         string data = Encoding.UTF8.GetString(receiveBuffer).TrimEnd('\0');
                         WriteToSpeechConfigStream(data);
                         //DebugOut($"Received data: {receiveBuffer.Length}");
-                        //Console.WriteLine("-----------: " + data);                
+                        //Console.WriteLine("-----------: " + data);
                     }
                 }
+                DebugOut($"Done processing WebSocket");
             }
             catch (Exception ex)
             {
