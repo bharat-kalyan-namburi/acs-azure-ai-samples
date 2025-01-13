@@ -53,6 +53,8 @@ string agentCallConnectionId = null;
 string callerCorrelationId = null;
 string agentCorrelationId = null;
 bool noAgentCall = false;
+int callerTranslatorCount = 0;
+int agentTranslatorCount = 0;    
 
 
 app.MapGet("/", () => "Hello ACS CallAutomation!");
@@ -213,12 +215,14 @@ app.MapPost("/api/callbacks/{contextId}", async (
                 if (callMedia != null)
                 {
                     //Start media streaming on on the caller side
+                    logger.LogInformation($"[CALLER CALL] No agent call, starting media streaming ...");
                     StartMediaStreamingOptions options = new StartMediaStreamingOptions()
                     {
                         OperationContext = "startMediaStreamingContext"
                     };
 
                     await callMedia.StartMediaStreamingAsync();
+                    logger.LogInformation($"[CALLER CALL] Media streaming started ...");
                 }
             }
         }
@@ -335,15 +339,33 @@ app.Use(async (context, next) =>
                 }
                 Debug.WriteLine("agentWebSocket connected ...");
                 // send translation from caller to agent
-                var callerTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, callerWebsocket, agentWebSocket, "any", "en", "en-US-AvaMultilingualNeural", true);
-                await callerTranslator.ProcessWebSocketAsync();
+                if (callerTranslatorCount == 0)
+                {
+                    Debug.WriteLine("Starting Caller translator ...");
+                    callerTranslatorCount++;
+                    var callerTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, callerWebsocket, agentWebSocket, "any", "en", "en-US-AvaMultilingualNeural", true);
+                    await callerTranslator.ProcessWebSocketAsync();
+                }
+                else
+                {
+                    Debug.WriteLine("Caller translator already started ...");
+                }
             }
             else
             {
-                Debug.WriteLine("No agent call, starting media streaming ...");
+                Debug.WriteLine("No agent call. Using loopback mode ...");
                 // echo caller translation back on the caller side. 
-                var callerTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, callerWebsocket, callerWebsocket, "any", "en", "en-US-AvaMultilingualNeural", false);
-                await callerTranslator.ProcessWebSocketAsync();
+                if (callerTranslatorCount == 0)
+                {
+                    Debug.WriteLine("Starting Caller translator in loop back mode...");
+                    callerTranslatorCount++;
+                    var callerTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, callerWebsocket, callerWebsocket, "any", "en", "en-US-AvaMultilingualNeural", true);
+                    await callerTranslator.ProcessWebSocketAsync();
+                }
+                else
+                {
+                    Debug.WriteLine("Caller translator already started ...");
+                }
             }
         }
         else
@@ -365,8 +387,17 @@ app.Use(async (context, next) =>
             Debug.WriteLine("callerWebSocket connected ...");
 
             //send translation from agent to caller. Only turn on SDK logging once on the caller side.
-            var agentTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, agentWebSocket, callerWebsocket, "any", "de", "en-US-AvaMultilingualNeural", false);
-            await agentTranslator.ProcessWebSocketAsync();
+            if (agentTranslatorCount == 0)
+            {
+                Debug.WriteLine("Starting Agent translator ...");
+                agentTranslatorCount++;
+                var agentTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, agentWebSocket, callerWebsocket, "any", "de", "en-US-AvaMultilingualNeural", false);
+                await agentTranslator.ProcessWebSocketAsync();
+            }
+            else
+            {
+                Debug.WriteLine("Agent translator already started ...");
+            }
         }
         else
         {
