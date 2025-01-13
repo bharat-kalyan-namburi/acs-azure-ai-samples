@@ -141,7 +141,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
                         var audioData = OutStreamingData.GetAudioDataForOutbound(audio);
 
                         byte[] jsonBytes = Encoding.UTF8.GetBytes(audioData);
-                        //OutputWebSocket.SendAsync(new ArraySegment<byte>(jsonBytes), WebSocketMessageType.Text, false, new CancellationToken()).GetAwaiter().GetResult();
+                        OutputWebSocket.SendAsync(new ArraySegment<byte>(jsonBytes), WebSocketMessageType.Text, false, new CancellationToken()).GetAwaiter().GetResult();
                         await OutputWebSocket.SendAsync(new ArraySegment<byte>(jsonBytes), WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None);
                     }
                     else
