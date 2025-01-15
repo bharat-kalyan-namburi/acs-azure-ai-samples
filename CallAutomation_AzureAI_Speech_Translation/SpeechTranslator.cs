@@ -8,7 +8,7 @@ using System.Diagnostics;
 
 namespace CallAutomation_AzureAI_Speech_Translation
 {
-    public class SpeechTranslator
+    public class SpeechTranslator : IDisposable
     {
         private TranslationRecognizer recognizer;
         public WebSocket InputWebSocket { get; set; }
@@ -16,18 +16,22 @@ namespace CallAutomation_AzureAI_Speech_Translation
         private readonly PushAudioInputStream m_audioInputStream;
         private readonly TranslationRecognizer m_speechRecognizer;
         private readonly SpeechTranslationConfig m_speechConfig;
+        private readonly SpeechConfig m_speechOutConfig;
+        private readonly SpeechSynthesizer m_speechSynthesizer;
         private CancellationTokenSource m_cts;
-        //private ILogger<Program> m_logger;
+        private FileStream m_audioFileStream;
 
         public string FromLanguage;
         public string ToLanguage;
         public string VoiceName;
+        public bool advTTS;
 
         private void DebugOut(string logtext)
         {
+#if DEBUG
             string timestampedLog = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} - {logtext}";
             Debug.WriteLine(timestampedLog);
-            //m_logger.LogInformation(timestampedLog);
+#endif
         }
 
         private void stripRiffHeader(ref byte[] audioData)
@@ -39,6 +43,76 @@ namespace CallAutomation_AzureAI_Speech_Translation
             audioData = newAudioData;
         }
 
+        private int StringCount(string str, List<string> targets)
+        {
+            int count = 0;
+            foreach (var target in targets)
+            {
+                count += str.Split(new string[] { target }, StringSplitOptions.None).Length - 1;
+            }
+            return count;
+        }
+
+        private string CopyStringToLastOccurrence(string str, List<string> targets, int lastCount, bool isRecognized)
+        {
+            str += " ";
+            int count = StringCount(str, targets);
+
+            int index = -1;
+            if (!isRecognized)//Find the last occurrence of any of the target strings
+            {
+                foreach (var target in targets)
+                {
+                    int idx = str.LastIndexOf(target) + target.Length;
+                    if (idx > index)
+                    {
+                        index = idx;
+                    }
+                }
+            }
+
+            //Find the occurrences of the target strings we have already processed
+            if (lastCount > 0)
+            {
+                string strTemp = str;
+                //If this string comes from a recognized event then take the who string, otherwise just take the string up to the last target string occurance
+                if (!isRecognized)
+                {
+                    strTemp = str.Substring(0, index);
+                }
+                for (int i = 0; i < lastCount; i++)
+                {
+                    int index_ = int.MaxValue;
+                    foreach (var target in targets)
+                    {
+                        int idx_ = strTemp.IndexOf(target);
+                        if (idx_ > -1)
+                        {
+                            idx_ = idx_ + target.Length;
+                            if (idx_ < index_)
+                            {
+                                index_ = idx_;
+                            }
+                        }
+                    }
+                    strTemp = strTemp.Substring(index_);
+                }
+                DebugOut($"string: {str}, result string: {strTemp}, count: {count}, last count: {lastCount}");
+                return strTemp;
+            }
+            else
+            {
+                string strTemp = str;
+                //If this string comes from a recognized event then take the who string, otherwise just take the string up to the last target string occurance
+                if (!isRecognized)
+                {
+                    strTemp = str.Substring(0, index);
+                }
+                DebugOut($"string: {str}, result string: {strTemp}, count: {count}, last count: {lastCount}");
+                return strTemp;
+            }
+        }
+
         public SpeechTranslator(
             string speechSubscriptionKey,
             string speechRegion,
@@ -47,23 +121,30 @@ namespace CallAutomation_AzureAI_Speech_Translation
             string inboundLanguage,
             string outboundLanguage,
             string outboundVoice,
-            bool logSDK)
+            bool logSDK,
+            bool advancedTTS)
         {
             FromLanguage = inboundLanguage;
             ToLanguage = outboundLanguage;
             VoiceName = outboundVoice;
             InputWebSocket = inboundWebSocket;
             OutputWebSocket = outboundWebSocket;
+            advTTS = advancedTTS;
+
+            // Initialize the log file stream
+            string logFilename = $"E:\\Logs\\SDK-log-{DateTime.Now:yyyyMMdd-HHmmss}.txt";
+
+            // Initialize the audio file stream
+            string audioFilename = $"E:\\Logs\\audio-{DateTime.Now:yyyyMMdd-HHmmss}.raw";
+            m_audioFileStream = new FileStream(audioFilename, FileMode.Create, FileAccess.Write);
+
             // Use the v2 endpoint to get the new translation features
             string v2Endpoint = $"wss://{speechRegion}.stt.speech.microsoft.com/speech/universal/v2";
             var v2EndpointUrl = new Uri(v2Endpoint);
             m_speechConfig = SpeechTranslationConfig.FromEndpoint(v2EndpointUrl, speechSubscriptionKey);
-            //m_speechConfig = SpeechTranslationConfig.FromSubscription(speechSubscriptionKey, speechRegion);
 
             if (logSDK)
             {
-                // Generate log filename with date and timestamp
-                string logFilename = $"E:\\Logs\\SDK-log-{DateTime.Now:yyyyMMdd-HHmmss}.txt";
                 // Enable Speech SDK logs for debugging purposes
                 m_speechConfig.SetProperty(PropertyId.Speech_LogFilename, logFilename);
             }
@@ -73,11 +154,20 @@ namespace CallAutomation_AzureAI_Speech_Translation
 
             //m_speechConfig.SpeechRecognitionLanguage = FromLanguage;
             m_speechConfig.AddTargetLanguage(ToLanguage);
-            m_speechConfig.VoiceName = VoiceName;
-            //This doesn't seem to work for speech translation
-            //m_speechConfig.SetSpeechSynthesisOutputFormat(SpeechSynthesisOutputFormat.Raw24Khz16BitMonoPcm);
 
-            //Enable semantic segmentation for shorter translation turns
+            if (!advTTS)
+                m_speechConfig.VoiceName = VoiceName;
+            else
+            {
+                m_speechOutConfig = SpeechConfig.FromSubscription(speechSubscriptionKey, speechRegion);
+                m_speechOutConfig.SpeechSynthesisVoiceName = VoiceName;
+                m_speechOutConfig.SetSpeechSynthesisOutputFormat(SpeechSynthesisOutputFormat.Raw16Khz16BitMonoPcm);
+                m_speechSynthesizer = new SpeechSynthesizer(m_speechOutConfig, null);
+
+                SubscribeToSynthEvents();
+            }
+
+            //Enable semantic segmentation for shorter translation turns - this only seems to work right now if the input language is "en-US"
             m_speechConfig.SetProperty(PropertyId.Speech_SegmentationStrategy, "Semantic");
             //This setting makes the partial translation results more stable, but it also makes the translation results a bit slower.
             m_speechConfig.SetProperty(PropertyId.SpeechServiceResponse_TranslationRequestStablePartialResult, "true");
@@ -101,55 +191,78 @@ namespace CallAutomation_AzureAI_Speech_Translation
 
         public void SubscribeToRecognizeEvents()
         {
+            int segmentNumber = 0;
+
+            //This is the list of target strings to trigger the TTS output. Includes English and Chinese punctuation. May need to add more target strings for other target languages.
+            var targets = new List<string> { ". ", "? ", ", ", "。", "？" };
+
             // Subscribes to events.
-            m_speechRecognizer.Recognizing += (s, e) =>
+            m_speechRecognizer.Recognizing += async (s, e) =>
             {
-                DebugOut($"RECOGNIZING in '{FromLanguage}': Text={e.Result.Text}");
-                foreach (var element in e.Result.Translations)
+                var transText = e.Result.Translations[ToLanguage];
+                DebugOut($"Recognizing translation to {ToLanguage}: {transText}");
+
+                if (advTTS)
                 {
-                    DebugOut($"Recognizing '{element.Key}': {element.Value}");
+                    int count = StringCount(transText, targets);
+                    if (count > segmentNumber)
+                    {
+                        //Console.WriteLine("Intermediate Sent to Synth");
+                        var transToSynth = CopyStringToLastOccurrence(transText, targets, segmentNumber, false);
+                        segmentNumber = count;
+
+                        DebugOut($"Speaking Recognizing: {transToSynth}");
+                        //Output TTS here
+                        await Task.Run(() => SendSynthesizedOutput(transToSynth));
+                    }
                 }
             };
 
-            m_speechRecognizer.Recognized += (s, e) =>
+            m_speechRecognizer.Recognized += async (s, e) =>
             {
                 if (e.Result.Reason == ResultReason.TranslatedSpeech)
                 {
-                    DebugOut($"Final result: Reason: {e.Result.Reason.ToString()}, recognized text in {FromLanguage}: {e.Result.Text}.");
-                    foreach (var element in e.Result.Translations)
+                    var transText = e.Result.Translations[ToLanguage];
+                    if (!string.IsNullOrEmpty(e.Result.Text))
                     {
-                        DebugOut($"Translated into '{element.Key}': {element.Value}");
+                        DebugOut($"Recognized translation to {ToLanguage}: {transText}");
+
+                        if (advTTS)
+                        {
+                            var transToSynth = CopyStringToLastOccurrence(transText, targets, segmentNumber, true);
+                            segmentNumber = 0;
+                            //Output TTS here
+                            DebugOut($"Speaking Recognized: {transToSynth}");
+                            await Task.Run(() => SendSynthesizedOutput(transToSynth));
+                        }
                     }
                 }
             };
 
             m_speechRecognizer.Synthesizing += async (s, e) =>
             {
-                if (OutputWebSocket != null)
+                if (!advTTS)
                 {
-                    var audio = e.Result.GetAudio();
-                    if (audio.Length > 0)
+                    if (OutputWebSocket != null)
                     {
-                        DebugOut($"TTS out AudioSize: {audio.Length}");
-                        // strip the RIFF header from the audio data
-                        stripRiffHeader(ref audio);
-                        // Log audio to binary file
-                        // open binary file for appending
-                        //using (var fileStream = new FileStream("E:\\Logs\\audio.raw", FileMode.Append))
-                        //{
-                        //    fileStream.Write(audio, 0, audio.Length);
-                        //}
+                        var audio = e.Result.GetAudio();
+                        if (audio.Length > 0)
+                        {
+                            DebugOut($"TTS out AudioSize: {audio.Length}");
+                            // strip the RIFF header from the audio data
+                            stripRiffHeader(ref audio);
 
-                        // Create a ServerAudioData object for this chunk
-                        var audioData = OutStreamingData.GetAudioDataForOutbound(audio);
+                            // Create a ServerAudioData object for this chunk
+                            var audioData = OutStreamingData.GetAudioDataForOutbound(audio);
 
-                        byte[] jsonBytes = Encoding.UTF8.GetBytes(audioData);
-                        //OutputWebSocket.SendAsync(new ArraySegment<byte>(jsonBytes), WebSocketMessageType.Text, false, new CancellationToken()).GetAwaiter().GetResult();
-                        await OutputWebSocket.SendAsync(new ArraySegment<byte>(jsonBytes), WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None);
-                    }
-                    else
-                    {
-                        DebugOut($"TTS out AudioSize: {audio.Length} (end of synthesis data)");
+                            byte[] jsonBytes = Encoding.UTF8.GetBytes(audioData);
+                            //OutputWebSocket.SendAsync(new ArraySegment<byte>(jsonBytes), WebSocketMessageType.Text, false, new CancellationToken()).GetAwaiter().GetResult();
+                            await OutputWebSocket.SendAsync(new ArraySegment<byte>(jsonBytes), WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None);
+                        }
+                        else
+                        {
+                            DebugOut($"TTS out AudioSize: {audio.Length} (end of synthesis data)");
+                        }
                     }
                 }
             };
@@ -170,6 +283,34 @@ namespace CallAutomation_AzureAI_Speech_Translation
             };
         }
 
+        public void SubscribeToSynthEvents()
+        {
+            m_speechSynthesizer.SynthesisCanceled += (s, e) =>
+            {
+                DebugOut("SynthesisCanceled event");
+                var cancellationDetails = SpeechSynthesisCancellationDetails.FromResult(e.Result);
+                DebugOut($"Speech synthesis canceled: {cancellationDetails.Reason}");
+                if (cancellationDetails.Reason == CancellationReason.Error && cancellationDetails.ErrorDetails != null)
+                {
+                    DebugOut($"Error details: {cancellationDetails.ErrorDetails}");
+                    DebugOut("Did you set the speech resource key and region values?");
+                }
+            };
+            m_speechSynthesizer.SynthesisCompleted += (s, e) =>
+            {
+                DebugOut($"SynthesisCompleted event: - AudioData: {e.Result.AudioData.Length} bytes - AudioDuration: {e.Result.AudioDuration}");
+            };
+            m_speechSynthesizer.SynthesisStarted += (s, e) =>
+            {
+                DebugOut("SynthesisStarted event");
+            };
+            m_speechSynthesizer.Synthesizing += (s, e) =>
+            {
+                DebugOut($"Synthesizing event");
+            };
+
+        }
+
         private void WriteToSpeechConfigStream(string data)
         {
             var input = StreamingData.Parse(data);
@@ -179,6 +320,30 @@ namespace CallAutomation_AzureAI_Speech_Translation
                 {
                     //DebugOut($"Pushing non-silence audio data: {audioData.Data.Length}");
                     m_audioInputStream.Write(audioData.Data);
+                    // Write audio to binary file
+                    m_audioFileStream.Write(audioData.Data);
+                }
+            }
+        }
+
+        private async Task SendSynthesizedOutput(string transToSynth)
+        {
+            using (var result = await m_speechSynthesizer.StartSpeakingTextAsync(transToSynth))
+            {
+                using (var audioDataStream = AudioDataStream.FromResult(result))
+                {
+                    byte[] audio = new byte[1600];
+                    int filledSize = 0;
+                    while ((filledSize = (int)audioDataStream.ReadData(audio)) > 0)
+                    {
+
+                        var audioData = OutStreamingData.GetAudioDataForOutbound(audio);
+
+                        byte[] jsonBytes = Encoding.UTF8.GetBytes(audioData);
+                        //OutputWebSocket.SendAsync(new ArraySegment<byte>(jsonBytes), WebSocketMessageType.Text, false, new CancellationToken()).GetAwaiter().GetResult();
+                        DebugOut($"TTS out {audio.Length} bytes");
+                        await OutputWebSocket.SendAsync(new ArraySegment<byte>(jsonBytes), WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None);
+                    }
                 }
             }
         }
@@ -195,7 +360,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
                 await m_speechRecognizer.StartContinuousRecognitionAsync();
                 while (InputWebSocket.State == WebSocketState.Open || InputWebSocket.State == WebSocketState.Closed)
                 {
-                    byte[] receiveBuffer = new byte[2048];
+                    byte[] receiveBuffer = new byte[1024];
                     //DebugOut($"Waiting for message from WebSocket {InputWebSocket.State}");
                     WebSocketReceiveResult receiveResult = await InputWebSocket.ReceiveAsync(new ArraySegment<byte>(receiveBuffer), m_cts.Token);
                     //DebugOut($"Received message from WebSocket. MessageType: {receiveResult.MessageType}, EndOfMessage: {receiveResult.EndOfMessage}, CloseStatus: {InputWebSocket.CloseStatus}");
@@ -220,5 +385,13 @@ namespace CallAutomation_AzureAI_Speech_Translation
             }
         }
 
+        public void Dispose()
+        {
+            m_audioFileStream?.Dispose();
+            m_cts?.Dispose();
+            m_audioInputStream?.Dispose();
+            m_speechRecognizer?.Dispose();
+            m_speechSynthesizer?.Dispose();
+        }
     }
 }
