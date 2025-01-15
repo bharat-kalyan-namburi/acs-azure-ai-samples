@@ -145,9 +145,13 @@ app.MapPost("/api/callbacks/{contextId}", async (
 
             if ("firstCallConnected".Equals(callConnected.OperationContext))
             {
-                logger.LogInformation($"First Call Connected. Starting recognize to get phone number");
+                logger.LogInformation($"First Call Connected {callerId}. Starting recognize to get phone number");
 
-                var recognizeOptions = new CallMediaRecognizeDtmfOptions(new PhoneNumberIdentifier("+14258298235"), 11)
+                //PhoneNumberIdentifier callerNumber = new PhoneNumberIdentifier("+14258298235");
+                PhoneNumberIdentifier callerNumber2 = new PhoneNumberIdentifier("+" + callerId.Substring(callerId.Length - 11));
+                //logger.LogInformation($"{callerNumber}\t{callerNumber2}");
+
+                var recognizeOptions = new CallMediaRecognizeDtmfOptions(callerNumber2, 11) 
                 {
                     Prompt = new TextSource("Hello! Welcome to the multi language calling sample. Please enter your 10 digit US phone number followed by Pound sign.", "en-US", VoiceKind.Male),
                     StopTones = new List<DtmfTone> { DtmfTone.Pound },
@@ -336,7 +340,7 @@ app.Use(async (context, next) =>
                 Debug.WriteLine("agentWebSocket connected ...");
                 // send translation from caller to agent
                 Debug.WriteLine("Starting Caller translator ...");
-                var callerTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, callerWebsocket, agentWebSocket, "any", "en", "en-US-AvaMultilingualNeural", true);
+                var callerTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, callerWebsocket, agentWebSocket, "any", "en", "en-US-AvaMultilingualNeural", true, true);
                 await callerTranslator.ProcessWebSocketAsync();
             }
             else
@@ -344,7 +348,7 @@ app.Use(async (context, next) =>
                 Debug.WriteLine("No agent call. Using loopback mode ...");
                 // echo caller translation back on the caller side. 
                 Debug.WriteLine("Starting Caller translator in loop back mode...");
-                var callerTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, callerWebsocket, callerWebsocket, "any", "en", "en-US-AvaMultilingualNeural", true);
+                var callerTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, callerWebsocket, callerWebsocket, "de-DE", "en", "en-US-AvaMultilingualNeural", true, true);
                 await callerTranslator.ProcessWebSocketAsync();
             }
         }
@@ -368,7 +372,7 @@ app.Use(async (context, next) =>
 
             //send translation from agent to caller. Only turn on SDK logging once on the caller side.
             Debug.WriteLine("Starting Agent translator ...");
-            var agentTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, agentWebSocket, callerWebsocket, "any", "de", "en-US-AvaMultilingualNeural", false);
+            var agentTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, agentWebSocket, callerWebsocket, "any", "de", "en-US-AvaMultilingualNeural", false, true);
             await agentTranslator.ProcessWebSocketAsync();
         }
         else
