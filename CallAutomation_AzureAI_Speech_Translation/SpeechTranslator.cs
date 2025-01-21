@@ -135,8 +135,8 @@ namespace CallAutomation_AzureAI_Speech_Translation
             string logFilename = $"E:\\Logs\\SDK-log-{DateTime.Now:yyyyMMdd-HHmmss}.txt";
 
             // Initialize the audio file stream
-            string audioFilename = $"E:\\Logs\\audio-{DateTime.Now:yyyyMMdd-HHmmss}.raw";
-            m_audioFileStream = new FileStream(audioFilename, FileMode.Create, FileAccess.Write);
+            //string audioFilename = $"E:\\Logs\\audio-{DateTime.Now:yyyyMMdd-HHmmss}.raw";
+            //m_audioFileStream = new FileStream(audioFilename, FileMode.Create, FileAccess.Write);
 
             // Use the v2 endpoint to get the new translation features
             string v2Endpoint = $"wss://{speechRegion}.stt.speech.microsoft.com/speech/universal/v2";
@@ -150,7 +150,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
             }
 
             // Enable server side audio logs for this translation session
-            m_speechConfig.EnableAudioLogging();
+            //m_speechConfig.EnableAudioLogging();
 
             //m_speechConfig.SpeechRecognitionLanguage = FromLanguage;
             m_speechConfig.AddTargetLanguage(ToLanguage);
@@ -165,10 +165,17 @@ namespace CallAutomation_AzureAI_Speech_Translation
                 m_speechSynthesizer = new SpeechSynthesizer(m_speechOutConfig, null);
 
                 SubscribeToSynthEvents();
+
+                //Pre-connect to the TTS service to remove initial latency when the first TTS is requested
+                using (var TTSconnection = Connection.FromSpeechSynthesizer(m_speechSynthesizer))
+                {
+                    DebugOut("TTS: Pre-connect to the speech service.");
+                    TTSconnection.Open(true);
+                }
             }
 
             //Enable semantic segmentation for shorter translation turns - this only seems to work right now if the input language is "en-US"
-            m_speechConfig.SetProperty(PropertyId.Speech_SegmentationStrategy, "Semantic");
+            //m_speechConfig.SetProperty(PropertyId.Speech_SegmentationStrategy, "Semantic");
             //This setting makes the partial translation results more stable, but it also makes the translation results a bit slower.
             m_speechConfig.SetProperty(PropertyId.SpeechServiceResponse_TranslationRequestStablePartialResult, "true");
 
@@ -187,6 +194,18 @@ namespace CallAutomation_AzureAI_Speech_Translation
             }
 
             SubscribeToRecognizeEvents();
+
+            var connection = Connection.FromRecognizer(m_speechRecognizer);
+            try
+            {
+                DebugOut("STT: Pre-connect to the speech service.");
+                connection.Open(true);
+            }
+            catch (ApplicationException ex)
+            {
+                DebugOut($"Couldn't pre-connect. Details: {ex.Message}");
+            }
+
         }
 
         public void SubscribeToRecognizeEvents()
@@ -194,7 +213,8 @@ namespace CallAutomation_AzureAI_Speech_Translation
             int segmentNumber = 0;
 
             //This is the list of target strings to trigger the TTS output. Includes English and Chinese punctuation. May need to add more target strings for other target languages.
-            var targets = new List<string> { ". ", "? ", ", ", "。", "？" };
+            //var targets = new List<string> { ". ", "? ", ", ", "。", "？" };
+            var targets = new List<string> { ". ", "? ", "。", "？" };
 
             // Subscribes to events.
             m_speechRecognizer.Recognizing += async (s, e) =>
@@ -321,7 +341,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
                     //DebugOut($"Pushing non-silence audio data: {audioData.Data.Length}");
                     m_audioInputStream.Write(audioData.Data);
                     // Write audio to binary file
-                    m_audioFileStream.Write(audioData.Data);
+                    //m_audioFileStream.Write(audioData.Data);
                 }
             }
         }
