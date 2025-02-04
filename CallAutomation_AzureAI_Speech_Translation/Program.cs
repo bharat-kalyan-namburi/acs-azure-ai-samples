@@ -14,19 +14,19 @@ using System.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
 
-
-//Get ACS Connection String from appsettings.json
-var acsConnectionString = builder.Configuration.GetValue<string>("AcsConnectionString");
+//Get ACS Connection String from Environment Variable
+var acsConnectionString = Environment.GetEnvironmentVariable("AcsConnectionString");
 ArgumentNullException.ThrowIfNullOrEmpty(acsConnectionString);
 
-var acsPhoneNumber = builder.Configuration.GetValue<string>("AcsPhoneNumber");
+var acsPhoneNumber = Environment.GetEnvironmentVariable("AcsPhoneNumber");
 ArgumentNullException.ThrowIfNullOrEmpty(acsPhoneNumber);
 
-var speechSubscriptionKey = builder.Configuration.GetValue<string>("AzureAISpeechKey");
+var speechSubscriptionKey = Environment.GetEnvironmentVariable("AzureAISpeechKey");
 ArgumentNullException.ThrowIfNullOrEmpty(speechSubscriptionKey);
 
-var speechRegion = builder.Configuration.GetValue<string>("AzureAISpeechRegion");
+var speechRegion = Environment.GetEnvironmentVariable("AzureAISpeechRegion");
 ArgumentNullException.ThrowIfNullOrEmpty(speechRegion);
+
 
 //Call Automation Client
 var client = new CallAutomationClient(acsConnectionString);

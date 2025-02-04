@@ -1,31 +1,26 @@
-﻿{
-  "$schema": "http://json.schemastore.org/launchsettings.json",
-  "iisSettings": {
-    "windowsAuthentication": false,
-    "anonymousAuthentication": true,
-    "iisExpress": {
-      "applicationUrl": "http://localhost:6013",
-      "sslPort": 44368
-    }
-  },
+{
   "profiles": {
     "http": {
       "commandName": "Project",
-      "dotnetRunMessages": true,
       "launchBrowser": true,
-      "applicationUrl": "http://localhost:5071",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
-      }
+      },
+      "dotnetRunMessages": true,
+      "applicationUrl": "http://localhost:5071"
     },
     "https": {
       "commandName": "Project",
-      "dotnetRunMessages": true,
       "launchBrowser": true,
-      "applicationUrl": "https://localhost:7200;http://localhost:5071",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
-      }
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "AcsConnectionString": "endpoint=https://communication-services-aitesting.unitedstates.communication.azure.com/;accesskey=60csBr9LQCGagJHS263v1Q1vSEJeLOV1Q1UYQ5chNju22KBI1mg4JQQJ99BAACULyCpAArohAAAAAZCS71yK",
+        "AcsPhoneNumber": "+12515382290",
+        "AzureAISpeechKey": "d6252363716e406d821264db27405fef",
+        "AzureAISpeechRegion": "westus"
+      },
+      "dotnetRunMessages": true,
+      "applicationUrl": "https://localhost:7200;http://localhost:5071"
     },
     "IIS Express": {
       "commandName": "IISExpress",
@@ -33,6 +28,15 @@
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       }
+    }
+  },
+  "$schema": "http://json.schemastore.org/launchsettings.json",
+  "iisSettings": {
+    "windowsAuthentication": false,
+    "anonymousAuthentication": true,
+    "iisExpress": {
+      "applicationUrl": "http://localhost:6013",
+      "sslPort": 44368
     }
   }
 }
