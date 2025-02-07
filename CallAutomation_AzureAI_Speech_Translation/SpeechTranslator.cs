@@ -5,6 +5,8 @@ using Microsoft.CognitiveServices.Speech.Translation;
 using System.Net.WebSockets;
 using System.Text;
 using System.Diagnostics;
+using Microsoft.AspNetCore.Mvc.ModelBinding.Binders;
+using System.Diagnostics.CodeAnalysis;
 
 namespace CallAutomation_AzureAI_Speech_Translation
 {
@@ -20,6 +22,9 @@ namespace CallAutomation_AzureAI_Speech_Translation
         private readonly SpeechSynthesizer m_speechSynthesizer;
         private CancellationTokenSource m_cts;
         private FileStream m_audioFileStream;
+        private bool m_playingTranslation = false;
+        private long m_audioBytesSent = 0;
+        private long m_mediaStartTime = 0;
 
         public string FromLanguage;
         public string ToLanguage;
@@ -276,7 +281,6 @@ namespace CallAutomation_AzureAI_Speech_Translation
                             var audioData = OutStreamingData.GetAudioDataForOutbound(audio);
 
                             byte[] jsonBytes = Encoding.UTF8.GetBytes(audioData);
-                            //OutputWebSocket.SendAsync(new ArraySegment<byte>(jsonBytes), WebSocketMessageType.Text, false, new CancellationToken()).GetAwaiter().GetResult();
                             await OutputWebSocket.SendAsync(new ArraySegment<byte>(jsonBytes), WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None);
                         }
                         else
@@ -342,12 +346,15 @@ namespace CallAutomation_AzureAI_Speech_Translation
                     m_audioInputStream.Write(audioData.Data);
                     // Write audio to binary file
                     //m_audioFileStream.Write(audioData.Data);
+                    EchoInputAudioToOutput(audioData.Data, audioData.Timestamp);                   
                 }
             }
         }
 
         private async Task SendSynthesizedOutput(string transToSynth)
         {
+            //Block the playing of the Input audio while the TTS is playing
+            m_playingTranslation = true;
             using (var result = await m_speechSynthesizer.StartSpeakingTextAsync(transToSynth))
             {
                 using (var audioDataStream = AudioDataStream.FromResult(result))
@@ -360,11 +367,53 @@ namespace CallAutomation_AzureAI_Speech_Translation
                         var audioData = OutStreamingData.GetAudioDataForOutbound(audio);
 
                         byte[] jsonBytes = Encoding.UTF8.GetBytes(audioData);
-                        //OutputWebSocket.SendAsync(new ArraySegment<byte>(jsonBytes), WebSocketMessageType.Text, false, new CancellationToken()).GetAwaiter().GetResult();
                         DebugOut($"TTS out {audio.Length} bytes");
                         await OutputWebSocket.SendAsync(new ArraySegment<byte>(jsonBytes), WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None);
+                        m_audioBytesSent += audio.Length;
                     }
                 }
+            }
+            //Unblock the playing of the Input audio
+            m_playingTranslation = false;
+        }
+
+        private async Task EchoInputAudioToOutput(byte[] inputAudioData, DateTimeOffset timestamp)
+        {
+            try
+            {
+                if (OutputWebSocket != null && !m_playingTranslation)
+                {
+                    if (OutputWebSocket.State != WebSocketState.Open)
+                    {
+                        DebugOut($"OutputWebSocket is not open. State: {OutputWebSocket.State}");
+                        return;
+                    }
+                    var audioData = OutStreamingData.GetAudioDataForOutbound(inputAudioData);
+
+                    byte[] jsonBytes = Encoding.UTF8.GetBytes(audioData);
+                    string timeString1 = $"{timestamp.Hour}:{timestamp.Minute}:{timestamp.Second}.{timestamp.Millisecond}";
+                    if (m_mediaStartTime == 0)
+                    {
+                        m_mediaStartTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+                    }
+                    long timeDiff = DateTimeOffset.Now.ToUnixTimeMilliseconds() - m_mediaStartTime;
+                    long expectedBytes = timeDiff * 32;
+                    //absolute value of the difference between the expected bytes and the actual bytes sent should be less than 1600
+                    if (expectedBytes > m_audioBytesSent)
+                    {
+                        DebugOut($"{ToLanguage} Wrote {audioData.Length} bytes of InputAudio to Output, Timestamp {timeString1}, AudioBytes {m_audioBytesSent}, ExpectedBytes {expectedBytes}");
+                        await OutputWebSocket.SendAsync(new ArraySegment<byte>(jsonBytes), WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None);
+                        m_audioBytesSent += inputAudioData.Length;
+                    }
+                    else
+                    {
+                        DebugOut($"{ToLanguage} Skipped writing {audioData.Length} bytes of InputAudio to catch up, Timestamp {timeString1}, AudioBytes {m_audioBytesSent}, ExpectedBytes {expectedBytes}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugOut($"Exception -> {ex}");
             }
         }
 
@@ -377,6 +426,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
             }
             try
             {
+                await SendSynthesizedOutput("Starting to translate your speech.");
                 await m_speechRecognizer.StartContinuousRecognitionAsync();
                 while (InputWebSocket.State == WebSocketState.Open || InputWebSocket.State == WebSocketState.Closed)
                 {
