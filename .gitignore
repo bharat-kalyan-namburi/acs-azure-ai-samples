@@ -348,3 +348,4 @@ MigrationBackup/
 
 # Ionide (cross platform F# VS Code tools) working folder
 .ionide/
+/CallAutomation_AzureAI_Speech_Translation/Properties/launchSettings.json
