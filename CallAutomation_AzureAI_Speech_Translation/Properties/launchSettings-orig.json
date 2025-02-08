@@ -14,10 +14,10 @@
       "launchBrowser": true,
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
-        "AcsConnectionString": "endpoint=https://communication-services-aitesting.unitedstates.communication.azure.com/;accesskey=60csBr9LQCGagJHS263v1Q1vSEJeLOV1Q1UYQ5chNju22KBI1mg4JQQJ99BAACULyCpAArohAAAAAZCS71yK",
-        "AcsPhoneNumber": "+12515382290",
-        "AzureAISpeechKey": "d6252363716e406d821264db27405fef",
-        "AzureAISpeechRegion": "westus"
+        "AcsConnectionString": "endpoint=<yourEndpoint>;accesskey=<yourAccessKey>",
+        "AcsPhoneNumber": "<yourPhoneNumber>",
+        "AzureAISpeechKey": "<yourAISpeechKey>",
+        "AzureAISpeechRegion": "<yourAISpeechRegion>"
       },
       "dotnetRunMessages": true,
       "applicationUrl": "https://localhost:7200;http://localhost:5071"
