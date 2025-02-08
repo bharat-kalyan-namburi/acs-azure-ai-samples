@@ -270,6 +270,12 @@ namespace CallAutomation_AzureAI_Speech_Translation
                 {
                     if (OutputWebSocket != null)
                     {
+                        if (OutputWebSocket.State != WebSocketState.Open)
+                        {
+                            DebugOut($"OutputWebSocket is not open. State: {OutputWebSocket.State}");
+                            return;
+                        }
+
                         var audio = e.Result.GetAudio();
                         if (audio.Length > 0)
                         {
@@ -353,28 +359,44 @@ namespace CallAutomation_AzureAI_Speech_Translation
 
         private async Task SendSynthesizedOutput(string transToSynth)
         {
-            //Block the playing of the Input audio while the TTS is playing
-            m_playingTranslation = true;
-            using (var result = await m_speechSynthesizer.StartSpeakingTextAsync(transToSynth))
+            try
             {
-                using (var audioDataStream = AudioDataStream.FromResult(result))
+                if (OutputWebSocket != null)
                 {
-                    byte[] audio = new byte[1600];
-                    int filledSize = 0;
-                    while ((filledSize = (int)audioDataStream.ReadData(audio)) > 0)
+                    if (OutputWebSocket.State != WebSocketState.Open)
                     {
-
-                        var audioData = OutStreamingData.GetAudioDataForOutbound(audio);
-
-                        byte[] jsonBytes = Encoding.UTF8.GetBytes(audioData);
-                        DebugOut($"TTS out {audio.Length} bytes");
-                        await OutputWebSocket.SendAsync(new ArraySegment<byte>(jsonBytes), WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None);
-                        m_audioBytesSent += audio.Length;
+                        DebugOut($"OutputWebSocket is not open. State: {OutputWebSocket.State}");
+                        return;
                     }
+
+                    //Block the playing of the Input audio while the TTS is playing
+                    m_playingTranslation = true;
+                    using (var result = await m_speechSynthesizer.StartSpeakingTextAsync(transToSynth))
+                    {
+                        using (var audioDataStream = AudioDataStream.FromResult(result))
+                        {
+                            byte[] audio = new byte[1600];
+                            int filledSize = 0;
+                            while ((filledSize = (int)audioDataStream.ReadData(audio)) > 0)
+                            {
+
+                                var audioData = OutStreamingData.GetAudioDataForOutbound(audio);
+
+                                byte[] jsonBytes = Encoding.UTF8.GetBytes(audioData);
+                                DebugOut($"TTS out {audio.Length} bytes");
+                                await OutputWebSocket.SendAsync(new ArraySegment<byte>(jsonBytes), WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None);
+                                m_audioBytesSent += audio.Length;
+                            }
+                        }
+                    }
+                    //Unblock the playing of the Input audio
+                    m_playingTranslation = false;
                 }
             }
-            //Unblock the playing of the Input audio
-            m_playingTranslation = false;
+            catch (Exception ex)
+            {
+                DebugOut($"Exception -> {ex}");
+            }
         }
 
         private async Task EchoInputAudioToOutput(byte[] inputAudioData, DateTimeOffset timestamp)
