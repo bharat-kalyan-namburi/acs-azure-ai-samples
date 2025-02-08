@@ -7,7 +7,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Content Remove="Properties\my-launchSettings.json" />
+    <None Remove="Properties\launchSettings-orig.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Properties\launchSettings-orig.json" />
   </ItemGroup>
 
   <ItemGroup>
