@@ -5,8 +5,11 @@ VisualStudioVersion = 17.11.35431.28
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CallAutomation_AzureAI_Speech_Translation", "CallAutomation_AzureAI_Speech_Translation.csproj", "{38891CDC-5372-4A48-83A4-60E58EFF4357}"
 EndProject
+<<<<<<< HEAD
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FileMonitoringService", "..\FileMonitoringService\FileMonitoringService.csproj", "{DACFED34-7F19-4DF5-AC4F-1E1F38471168}"
 EndProject
+=======
+>>>>>>> 2ad0f1b7b51c2e2ce8677bf99bea9386b0d0d789
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -17,10 +20,13 @@ Global
 		{38891CDC-5372-4A48-83A4-60E58EFF4357}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{38891CDC-5372-4A48-83A4-60E58EFF4357}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{38891CDC-5372-4A48-83A4-60E58EFF4357}.Release|Any CPU.Build.0 = Release|Any CPU
+<<<<<<< HEAD
 		{DACFED34-7F19-4DF5-AC4F-1E1F38471168}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{DACFED34-7F19-4DF5-AC4F-1E1F38471168}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{DACFED34-7F19-4DF5-AC4F-1E1F38471168}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{DACFED34-7F19-4DF5-AC4F-1E1F38471168}.Release|Any CPU.Build.0 = Release|Any CPU
+=======
+>>>>>>> 2ad0f1b7b51c2e2ce8677bf99bea9386b0d0d789
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
