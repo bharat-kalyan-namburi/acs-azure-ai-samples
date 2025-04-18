@@ -1,0 +1,45 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Local Translation Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+
+        #output {
+            font-size: 1.2em;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <h1>Translation Output</h1>
+    <div id="output">Waiting for translation...</div>
+
+    <script>
+        // Replace with your actual server endpoint URL
+        const getTextUrl = "http://localhost:5000/get-text";
+
+        async function fetchTextContent() {
+            try {
+                const response = await fetch(getTextUrl);
+                if (response.ok) {
+                    const textContent = await response.text();
+                    const formattedContent = textContent.replace(/\n/g, "<br>");
+                    document.getElementById("output").innerHTML = formattedContent;
+                } else {
+                    console.error("Failed to fetch text content:", response.statusText);
+                }
+            } catch (error) {
+                console.error("Error fetching text content:", error);
+            }
+        }
+
+        // Poll the server every 0.1 seconds for updated text
+        setInterval(fetchTextContent, 100);
+    </script>
+</body>
+</html>

@@ -5,8 +5,7 @@ using Microsoft.CognitiveServices.Speech.Translation;
 using System.Net.WebSockets;
 using System.Text;
 using System.Diagnostics;
-using Microsoft.AspNetCore.Mvc.ModelBinding.Binders;
-using System.Diagnostics.CodeAnalysis;
+using Microsoft.AspNetCore.Identity;
 
 namespace CallAutomation_AzureAI_Speech_Translation
 {
@@ -23,12 +22,15 @@ namespace CallAutomation_AzureAI_Speech_Translation
         private CancellationTokenSource m_cts;
         private FileStream m_audioFileStream;
         private bool m_playingTranslation = false;
+        private bool m_firstTranslation = true;
         private long m_audioBytesSent = 0;
         private long m_mediaStartTime = 0;
+        private bool m_resumedEcho = false;
 
         public string FromLanguage;
         public string ToLanguage;
         public string VoiceName;
+        public string role;
         public bool advTTS;
 
         private void DebugOut(string logtext)
@@ -126,6 +128,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
             string inboundLanguage,
             string outboundLanguage,
             string outboundVoice,
+            string callerRole,
             bool logSDK,
             bool advancedTTS)
         {
@@ -135,6 +138,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
             InputWebSocket = inboundWebSocket;
             OutputWebSocket = outboundWebSocket;
             advTTS = advancedTTS;
+            role = callerRole;
 
             // Initialize the log file stream
             string logFilename = $"E:\\Logs\\SDK-log-{DateTime.Now:yyyyMMdd-HHmmss}.txt";
@@ -199,6 +203,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
             }
 
             SubscribeToRecognizeEvents();
+            SendTranslationText("<clear>").Wait();
 
             var connection = Connection.FromRecognizer(m_speechRecognizer);
             try
@@ -213,6 +218,36 @@ namespace CallAutomation_AzureAI_Speech_Translation
 
         }
 
+        // Helper method to send translation text to a local service
+        private async Task SendTranslationText(string text)
+        {
+            const string updateTextUrl = "http://localhost:5000/update-text"; // URL of the update-text endpoint
+
+            try
+            {
+                using (var httpClient = new HttpClient())
+                {
+                    text = "[" + role + "] " + text;
+                    var content = new StringContent(text, Encoding.UTF8, "text/plain");
+                    var response = await httpClient.PostAsync(updateTextUrl, content);
+
+                    if (response.IsSuccessStatusCode)
+                    {
+                        DebugOut($"Successfully sent translation text to {updateTextUrl}");
+                    }
+                    else
+                    {
+                        DebugOut($"Failed to send translation text. Status Code: {response.StatusCode}, Reason: {response.ReasonPhrase}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugOut($"Exception occurred while sending translation text: {ex.Message}");
+            }
+        }
+
+
         public void SubscribeToRecognizeEvents()
         {
             int segmentNumber = 0;
@@ -226,6 +261,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
             {
                 var transText = e.Result.Translations[ToLanguage];
                 DebugOut($"Recognizing translation to {ToLanguage}: {transText}");
+                await SendTranslationText(transText);
 
                 if (advTTS)
                 {
@@ -251,6 +287,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
                     if (!string.IsNullOrEmpty(e.Result.Text))
                     {
                         DebugOut($"Recognized translation to {ToLanguage}: {transText}");
+                        await SendTranslationText(transText + "\n\n");
 
                         if (advTTS)
                         {
@@ -259,6 +296,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
                             //Output TTS here
                             DebugOut($"Speaking Recognized: {transToSynth}");
                             await Task.Run(() => SendSynthesizedOutput(transToSynth));
+                            m_firstTranslation = false;
                         }
                     }
                 }
@@ -391,11 +429,37 @@ namespace CallAutomation_AzureAI_Speech_Translation
                     }
                     //Unblock the playing of the Input audio
                     m_playingTranslation = false;
+                    m_resumedEcho = false;
+                    //DebugOut("Set m_resumedEcho to false");
                 }
             }
             catch (Exception ex)
             {
                 DebugOut($"Exception -> {ex}");
+            }
+        }
+
+        private void lowerVolume(byte[] audioBytes)
+        {
+            // Convert byte array to an array of 16-bit values
+            short[] audioSamples = new short[audioBytes.Length / 2];
+            for (int i = 0; i < audioSamples.Length; i++)
+            {
+                audioSamples[i] = BitConverter.ToInt16(audioBytes, i * 2);
+            }
+
+            // Lower the volume by reducing the amplitude of each sample. Assumes 16-bit PCM audio.
+            for (int i = 0; i < audioSamples.Length; i++)
+            {
+                audioSamples[i] = (short)(audioSamples[i] * 0.25); // Reduce volume by 75%
+            }
+
+            // Convert the array of 16-bit values back to a byte array
+            for (int i = 0; i < audioSamples.Length; i++)
+            {
+                byte[] bytes = BitConverter.GetBytes(audioSamples[i]);
+                audioBytes[i * 2] = bytes[0];
+                audioBytes[i * 2 + 1] = bytes[1];
             }
         }
 
@@ -410,6 +474,12 @@ namespace CallAutomation_AzureAI_Speech_Translation
                         DebugOut($"OutputWebSocket is not open. State: {OutputWebSocket.State}");
                         return;
                     }
+                    //if we already translated some audio then lower the volume of the rest of the echoed audio
+                    if(!m_firstTranslation)
+                    {
+                        lowerVolume(inputAudioData);
+                    }
+                    
                     var audioData = OutStreamingData.GetAudioDataForOutbound(inputAudioData);
 
                     byte[] jsonBytes = Encoding.UTF8.GetBytes(audioData);
@@ -426,6 +496,12 @@ namespace CallAutomation_AzureAI_Speech_Translation
                         DebugOut($"{ToLanguage} Wrote {audioData.Length} bytes of InputAudio to Output, Timestamp {timeString1}, AudioBytes {m_audioBytesSent}, ExpectedBytes {expectedBytes}");
                         await OutputWebSocket.SendAsync(new ArraySegment<byte>(jsonBytes), WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None);
                         m_audioBytesSent += inputAudioData.Length;
+                        //if(!m_firstTranslation && !m_resumedEcho)
+                        //{
+                        //    await SendTranslationText("[Audio Sent]\n\n");
+                        //    m_resumedEcho = true;
+                        //    DebugOut("[" + role + "]: Set m_resumedEcho to true");
+                        //}                       
                     }
                     else
                     {
