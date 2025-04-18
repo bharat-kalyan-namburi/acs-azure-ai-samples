@@ -5,6 +5,7 @@ using Microsoft.CognitiveServices.Speech.Translation;
 using System.Net.WebSockets;
 using System.Text;
 using System.Diagnostics;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace CallAutomation_AzureAI_Speech_Translation
 {
@@ -203,7 +204,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
             }
 
             SubscribeToRecognizeEvents();
-            SendTranslationText("<clear>").Wait();
+            SendTranslationText("", "<clear>").Wait();
 
             var connection = Connection.FromRecognizer(m_speechRecognizer);
             try
@@ -218,7 +219,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
 
         }
 
-        private async Task SendTranslationText(string text)
+        private async Task SendTranslationText(string role, string text)
         {
             const string updateTextUrl = "http://localhost:5000/update-text"; // URL of the update-text endpoint
 
@@ -260,7 +261,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
             {
                 var transText = e.Result.Translations[ToLanguage];
                 DebugOut($"Recognizing translation to {ToLanguage}: {transText}");
-                await SendTranslationText(transText);
+                await SendTranslationText(role, transText);
 
 
                 if (advTTS)
@@ -287,7 +288,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
                     if (!string.IsNullOrEmpty(e.Result.Text))
                     {
                         DebugOut($"Recognized translation to {ToLanguage}: {transText}");
-                        await SendTranslationText(transText + "\n\n");
+                        await SendTranslationText(role, transText + "\n\n");
 
                         if (advTTS)
                         {
@@ -527,7 +528,22 @@ namespace CallAutomation_AzureAI_Speech_Translation
             }
             try
             {
-                await SendSynthesizedOutput("Starting to translate your speech.");
+                if (role == "agent")
+                {
+                    string text = "Thank you for calling Contoso Corporation. I am your live translation agent to help facilitate your conversation. Please allow for some delayed response by the agent assisting you while I finish translating. Thank you.";
+                    if (ToLanguage == "de")
+                    {
+                        text = "Danke, dass Sie die Contoso Corporation angerufen haben. Ich bin Ihre automatische Live-Übersetzung, um Ihre Unterhaltung zu ermöglichen. Bitte erlauben Sie etwas Zeit für die Übersetzung. Vielen Dank.";
+                    }
+                    await SendSynthesizedOutput(text);
+                    SendTranslationText("System", text);
+                }
+                else
+                {
+                    string text = "This call is being automatically translated.";
+                    await SendSynthesizedOutput(text);
+                    SendTranslationText("System", text);
+                }
                 await m_speechRecognizer.StartContinuousRecognitionAsync();
                 while (InputWebSocket.State == WebSocketState.Open || InputWebSocket.State == WebSocketState.Closed)
                 {
