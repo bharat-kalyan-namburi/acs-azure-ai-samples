@@ -5,12 +5,6 @@ using Microsoft.CognitiveServices.Speech.Translation;
 using System.Net.WebSockets;
 using System.Text;
 using System.Diagnostics;
-<<<<<<< HEAD
-using Microsoft.AspNetCore.Identity;
-=======
-using Microsoft.AspNetCore.Mvc.ModelBinding.Binders;
-using System.Diagnostics.CodeAnalysis;
->>>>>>> 2ad0f1b7b51c2e2ce8677bf99bea9386b0d0d789
 
 namespace CallAutomation_AzureAI_Speech_Translation
 {
@@ -27,23 +21,16 @@ namespace CallAutomation_AzureAI_Speech_Translation
         private CancellationTokenSource m_cts;
         private FileStream m_audioFileStream;
         private bool m_playingTranslation = false;
-<<<<<<< HEAD
         private bool m_firstTranslation = true;
         private long m_audioBytesSent = 0;
         private long m_mediaStartTime = 0;
         private bool m_resumedEcho = false;
-=======
-        private long m_audioBytesSent = 0;
-        private long m_mediaStartTime = 0;
->>>>>>> 2ad0f1b7b51c2e2ce8677bf99bea9386b0d0d789
-
+  
         public string FromLanguage;
         public string ToLanguage;
         public string VoiceName;
-<<<<<<< HEAD
         public string role;
-=======
->>>>>>> 2ad0f1b7b51c2e2ce8677bf99bea9386b0d0d789
+
         public bool advTTS;
 
         private void DebugOut(string logtext)
@@ -141,10 +128,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
             string inboundLanguage,
             string outboundLanguage,
             string outboundVoice,
-<<<<<<< HEAD
             string callerRole,
-=======
->>>>>>> 2ad0f1b7b51c2e2ce8677bf99bea9386b0d0d789
             bool logSDK,
             bool advancedTTS)
         {
@@ -154,10 +138,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
             InputWebSocket = inboundWebSocket;
             OutputWebSocket = outboundWebSocket;
             advTTS = advancedTTS;
-<<<<<<< HEAD
             role = callerRole;
-=======
->>>>>>> 2ad0f1b7b51c2e2ce8677bf99bea9386b0d0d789
 
             // Initialize the log file stream
             string logFilename = $"E:\\Logs\\SDK-log-{DateTime.Now:yyyyMMdd-HHmmss}.txt";
@@ -222,10 +203,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
             }
 
             SubscribeToRecognizeEvents();
-<<<<<<< HEAD
             SendTranslationText("<clear>").Wait();
-=======
->>>>>>> 2ad0f1b7b51c2e2ce8677bf99bea9386b0d0d789
 
             var connection = Connection.FromRecognizer(m_speechRecognizer);
             try
@@ -240,8 +218,6 @@ namespace CallAutomation_AzureAI_Speech_Translation
 
         }
 
-<<<<<<< HEAD
-        // Helper method to send translation text to a local service
         private async Task SendTranslationText(string text)
         {
             const string updateTextUrl = "http://localhost:5000/update-text"; // URL of the update-text endpoint
@@ -271,8 +247,6 @@ namespace CallAutomation_AzureAI_Speech_Translation
         }
 
 
-=======
->>>>>>> 2ad0f1b7b51c2e2ce8677bf99bea9386b0d0d789
         public void SubscribeToRecognizeEvents()
         {
             int segmentNumber = 0;
@@ -286,10 +260,8 @@ namespace CallAutomation_AzureAI_Speech_Translation
             {
                 var transText = e.Result.Translations[ToLanguage];
                 DebugOut($"Recognizing translation to {ToLanguage}: {transText}");
-<<<<<<< HEAD
                 await SendTranslationText(transText);
-=======
->>>>>>> 2ad0f1b7b51c2e2ce8677bf99bea9386b0d0d789
+
 
                 if (advTTS)
                 {
@@ -315,10 +287,7 @@ namespace CallAutomation_AzureAI_Speech_Translation
                     if (!string.IsNullOrEmpty(e.Result.Text))
                     {
                         DebugOut($"Recognized translation to {ToLanguage}: {transText}");
-<<<<<<< HEAD
                         await SendTranslationText(transText + "\n\n");
-=======
->>>>>>> 2ad0f1b7b51c2e2ce8677bf99bea9386b0d0d789
 
                         if (advTTS)
                         {
@@ -327,10 +296,8 @@ namespace CallAutomation_AzureAI_Speech_Translation
                             //Output TTS here
                             DebugOut($"Speaking Recognized: {transToSynth}");
                             await Task.Run(() => SendSynthesizedOutput(transToSynth));
-<<<<<<< HEAD
                             m_firstTranslation = false;
-=======
->>>>>>> 2ad0f1b7b51c2e2ce8677bf99bea9386b0d0d789
+
                         }
                     }
                 }
@@ -463,11 +430,8 @@ namespace CallAutomation_AzureAI_Speech_Translation
                     }
                     //Unblock the playing of the Input audio
                     m_playingTranslation = false;
-<<<<<<< HEAD
                     m_resumedEcho = false;
                     //DebugOut("Set m_resumedEcho to false");
-=======
->>>>>>> 2ad0f1b7b51c2e2ce8677bf99bea9386b0d0d789
                 }
             }
             catch (Exception ex)
@@ -476,7 +440,6 @@ namespace CallAutomation_AzureAI_Speech_Translation
             }
         }
 
-<<<<<<< HEAD
         private void lowerVolume(byte[] audioBytes)
         {
             // Convert byte array to an array of 16-bit values
@@ -501,8 +464,6 @@ namespace CallAutomation_AzureAI_Speech_Translation
             }
         }
 
-=======
->>>>>>> 2ad0f1b7b51c2e2ce8677bf99bea9386b0d0d789
         private async Task EchoInputAudioToOutput(byte[] inputAudioData, DateTimeOffset timestamp)
         {
             try
@@ -514,15 +475,12 @@ namespace CallAutomation_AzureAI_Speech_Translation
                         DebugOut($"OutputWebSocket is not open. State: {OutputWebSocket.State}");
                         return;
                     }
-<<<<<<< HEAD
                     //if we already translated some audio then lower the volume of the rest of the echoed audio
                     if(!m_firstTranslation)
                     {
                         lowerVolume(inputAudioData);
                     }
                     
-=======
->>>>>>> 2ad0f1b7b51c2e2ce8677bf99bea9386b0d0d789
                     var audioData = OutStreamingData.GetAudioDataForOutbound(inputAudioData);
 
                     byte[] jsonBytes = Encoding.UTF8.GetBytes(audioData);
@@ -539,15 +497,14 @@ namespace CallAutomation_AzureAI_Speech_Translation
                         DebugOut($"{ToLanguage} Wrote {audioData.Length} bytes of InputAudio to Output, Timestamp {timeString1}, AudioBytes {m_audioBytesSent}, ExpectedBytes {expectedBytes}");
                         await OutputWebSocket.SendAsync(new ArraySegment<byte>(jsonBytes), WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None);
                         m_audioBytesSent += inputAudioData.Length;
-<<<<<<< HEAD
+
                         //if(!m_firstTranslation && !m_resumedEcho)
                         //{
                         //    await SendTranslationText("[Audio Sent]\n\n");
                         //    m_resumedEcho = true;
                         //    DebugOut("[" + role + "]: Set m_resumedEcho to true");
                         //}                       
-=======
->>>>>>> 2ad0f1b7b51c2e2ce8677bf99bea9386b0d0d789
+
                     }
                     else
                     {

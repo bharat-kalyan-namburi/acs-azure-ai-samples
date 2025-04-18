@@ -340,11 +340,7 @@ app.Use(async (context, next) =>
                 Debug.WriteLine("agentWebSocket connected ...");
                 // send translation from caller to agent
                 Debug.WriteLine("Starting Caller translator ...");
-<<<<<<< HEAD
                 var callerTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, callerWebsocket, agentWebSocket, "de-DE", "en", "en-US-AvaMultilingualNeural", "caller", false, true);
-=======
-                var callerTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, callerWebsocket, agentWebSocket, "de-DE", "en", "en-US-AvaMultilingualNeural", true, true);
->>>>>>> 2ad0f1b7b51c2e2ce8677bf99bea9386b0d0d789
                 await callerTranslator.ProcessWebSocketAsync();
             }
             else
@@ -352,11 +348,7 @@ app.Use(async (context, next) =>
                 Debug.WriteLine("No agent call. Using loopback mode ...");
                 // echo caller translation back on the caller side. 
                 Debug.WriteLine("Starting Caller translator in loop back mode...");
-<<<<<<< HEAD
                 var callerTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, callerWebsocket, callerWebsocket, "any", "en", "en-US-AvaMultilingualNeural", "caller", true, true);
-=======
-                var callerTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, callerWebsocket, callerWebsocket, "any", "en", "en-US-AvaMultilingualNeural", true, true);
->>>>>>> 2ad0f1b7b51c2e2ce8677bf99bea9386b0d0d789
                 await callerTranslator.ProcessWebSocketAsync();
             }
         }
@@ -380,11 +372,7 @@ app.Use(async (context, next) =>
 
             //send translation from agent to caller. Only turn on SDK logging once on the caller side.
             Debug.WriteLine("Starting Agent translator ...");
-<<<<<<< HEAD
             var agentTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, agentWebSocket, callerWebsocket, "en-US", "de", "en-US-AvaMultilingualNeural", "agent", false, true);
-=======
-            var agentTranslator = new SpeechTranslator(speechSubscriptionKey, speechRegion, agentWebSocket, callerWebsocket, "en-US", "de", "en-US-AvaMultilingualNeural", false, true);
->>>>>>> 2ad0f1b7b51c2e2ce8677bf99bea9386b0d0d789
             await agentTranslator.ProcessWebSocketAsync();
         }
         else
